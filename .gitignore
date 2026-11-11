@@ -1,0 +1,10 @@
+# local build and check state (Chrome profiles, screenshots, gate runs)
+.taste-skill/
+shots/
+
+# the design kit's photo library; the pages load their photos from assets/img
+assets/photos/img/
+
+node_modules/
+.DS_Store
+Thumbs.db

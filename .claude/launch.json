@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "groupbuy", "runtimeExecutable": "node", "runtimeArgs": [".claude/serve.mjs", "5178"], "port": 5178 }
+  ]
+}
