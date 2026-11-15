@@ -247,7 +247,7 @@ function stair(g, opts = {}) {
   }).join('');
   const pill = opts.label ?? `${n} flats now`;
   const pw = pill.length * 7.4 + 20, px = Math.max(0, Math.min(W - pw, xn - pw / 2));
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Price by group size: ${p.tiers.map(([m, v]) => `${inr(v)} from ${m} ${m === 1 ? 'flat' : 'flats'}`).join(', ')}. ${n} joined, ${inr(priceAt(p, n))} each now.">
+  return `<svg data-xn="${xn}" data-yn="${yn}" data-px="${px}" data-pw="${pw}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Price by group size: ${p.tiers.map(([m, v]) => `${inr(v)} from ${m} ${m === 1 ? 'flat' : 'flats'}`).join(', ')}. ${n} joined, ${inr(priceAt(p, n))} each now.">
     <defs><clipPath id="${cid}"><rect x="0" y="0" width="${xn}" height="${H}"/></clipPath></defs>
     <line class="s-grid" x1="0" x2="${W}" y1="${base}" y2="${base}"/>
     <path class="s-area" d="${area}"/>
@@ -274,7 +274,7 @@ function nextLine(g) {
 function card(g) {
   const p = PBY[g.pid], mine = myLine(g), bk = inBasket(g.id);
   return `<a class="card" href="#/g/${g.id}">
-    <div class="card__photo">${photo(p)}
+    <div class="card__photo" data-photo="${g.id}">${photo(p)}
       <span class="tag">${I.clock}<span data-b="left" data-g="${g.id}">${left(g.closes - Date.now())}</span></span>
       ${mine ? `<span class="tag tag--you tag--right">${I.check}You're in</span>` : bk ? `<span class="tag tag--right">In basket</span>` : ''}
     </div>
@@ -303,7 +303,23 @@ const BIND = {
   pricebox: (el, g) => { const old = el.textContent; el.innerHTML = priceBox(g); if (old && old !== el.textContent) $('.price', el).classList.add('flash'); },
   tiers: (el, g) => { const fill = $('.tiers__fill', el); const w = fill?.style.width; el.innerHTML = tierBar(g); const nf = $('.tiers__fill', el); if (w && !reduced) { const target = nf.style.width; nf.style.width = w; requestAnimationFrame(() => requestAnimationFrame(() => { nf.style.width = target; })); } },
   meta: (el, g) => { el.innerHTML = metaLine(g); },
-  stair: (el, g) => { el.innerHTML = stair(g); },
+  stair: (el, g) => {
+    const old = $('svg', el)?.dataset;
+    const from = old && { xn: +old.xn, yn: +old.yn, px: +old.px };
+    el.innerHTML = stair(g);
+    const svg = $('svg', el), to = { xn: +svg.dataset.xn, yn: +svg.dataset.yn, px: +svg.dataset.px }, pw = +svg.dataset.pw;
+    if (!from || reduced || (from.xn === to.xn && from.yn === to.yn)) return;
+    // slide the "now" marker from where it was to where it is: a step down is a change you watch happen
+    const parts = { clip: $('clipPath rect', svg), now: $('.s-now', svg), dots: $$('.s-dot, .s-dot-ring', svg), bg: $('.s-you-bg', svg), you: $('.s-you', svg) };
+    const draw = t => {
+      const L = k => from[k] + (to[k] - from[k]) * t, xn = L('xn'), yn = L('yn'), px = L('px');
+      parts.clip.setAttribute('width', xn); parts.now.setAttribute('x1', xn); parts.now.setAttribute('x2', xn);
+      parts.dots.forEach(c => { c.setAttribute('cx', xn); c.setAttribute('cy', yn); });
+      parts.bg.setAttribute('x', px); parts.you.setAttribute('x', px + pw / 2);
+    };
+    draw(0);
+    spring({ from: 0, to: 1, response: 0.6, rest: 0.002, onUpdate: draw });
+  },
   next: (el, g) => { const nt = nextTier(PBY[g.pid], count(g)); el.classList.toggle('next--top', !nt); $('[data-next-text]', el).innerHTML = nextLine(g); },
   count: (el, g) => { el.textContent = count(g); },
   price: (el, g) => { const v = inr(priceNow(g)); if (el.textContent !== v) { el.textContent = v; el.closest('.panel__price')?.classList.add('flash'); } },
@@ -455,7 +471,7 @@ function viewDiscover() {
 function featureBlock(g) {
   const p = PBY[g.pid];
   return `<a class="feature" href="#/g/${g.id}" aria-label="${esc(p.name)}: closest to its next price drop">
-    <div class="feature__photo">${photo(p, '(max-width: 860px) 100vw, 42vw', true)}</div>
+    <div class="feature__photo" data-photo="${g.id}">${photo(p, '(max-width: 860px) 100vw, 42vw', true)}</div>
     <div class="feature__body">
       <div class="feature__top"><span class="eyebrow">Closest to a price drop</span><span class="tag" style="position:static">${I.clock}<span data-b="left" data-g="${g.id}">${left(g.closes - Date.now())}</span></span></div>
       <div><h2>${esc(p.name)}, ${esc(p.pack.toLowerCase())}</h2><p class="feature__call" data-b="next" data-g="${g.id}"><span data-next-text>${nextLine(g)}</span></p></div>
@@ -496,7 +512,7 @@ function viewGroup(id) {
     <a class="back" href="#/">${I.back}All group buys</a>
     <div class="detail">
       <div>
-        <div class="hero-photo">${photo(p, '(max-width: 1000px) 100vw, 58vw', true)}</div>
+        <div class="hero-photo" data-photo="${g.id}">${photo(p, '(max-width: 1000px) 100vw, 58vw', true)}</div>
         <dl class="facts">
           <div><dt>From</dt><dd>${esc(p.from)}</dd></div>
           <div><dt>Delivery</dt><dd>${esc(deliveryLabel(g))}</dd></div>
@@ -532,6 +548,17 @@ function viewGroup(id) {
       </aside>
     </div>
   </div></div>`;
+  if (g.status === 'open') {
+    VIEW.insertAdjacentHTML('beforeend', `<div class="buybar" data-buybar data-g="${g.id}" hidden>
+      <div class="buybar__info"><b data-b="price" data-g="${g.id}">${inr(priceNow(g))}</b><span>a ${esc(p.unit)} · <span data-b="left" data-g="${g.id}">${left(g.closes - Date.now())}</span></span></div>
+      <button class="btn btn--primary" type="button" data-buybar-act>Join</button>
+    </div>`);
+    const bb = $('[data-buybar]');
+    updateBuybar(g.id);
+    $('[data-buybar-act]', bb).addEventListener('click', e => { if (inBasket(g.id)) go('#/checkout'); else addToBasket(g.id, e.currentTarget); });
+    buyIO = new IntersectionObserver(([en]) => bb.classList.toggle('show', !en.isIntersecting), { rootMargin: '0px 0px -40px 0px' });
+    buyIO.observe($(`[data-b="join"][data-g="${g.id}"]`));
+  }
   wireJoin(g.id);
   $('[data-copy]').addEventListener('click', async e => {
     try { await navigator.clipboard.writeText(location.href); e.target.textContent = 'Link copied'; } catch { e.target.textContent = 'Copy failed'; }
@@ -541,48 +568,64 @@ function viewGroup(id) {
 }
 function wireJoin(gid) {
   const host = $(`[data-b="join"][data-g="${gid}"]`);
+  host.dataset.sig = joinSig(G(gid)); // so live price updates patch text instead of swapping the button out
   host.addEventListener('click', e => {
     const g = G(gid), p = PBY[g.pid];
     const qb = e.target.closest('[data-qty]');
     if (qb) {
       const cur = qtyDraft[gid] ?? inBasket(gid)?.q ?? 1;
       qtyDraft[gid] = Math.max(1, Math.min(6, cur + +qb.dataset.qty));
-      host.innerHTML = joinBlock(g);
+      host.innerHTML = joinBlock(g); host.dataset.sig = joinSig(g);
       $(`[data-qty="${qb.dataset.qty}"]`, host)?.focus();
       if ($(`[data-qty="${qb.dataset.qty}"]`, host)?.disabled) $('[data-join]', host)?.focus();
       return;
     }
-    if (e.target.closest('[data-join]')) {
-      const q = qtyDraft[gid] ?? inBasket(gid)?.q ?? 1;
-      const bk = inBasket(gid);
-      if (bk && bk.q === q) { openBasket(); return; }
-      if (bk) bk.q = q; else S.basket.push({ gid, q });
-      delete qtyDraft[gid];
-      save(); bindGlobal(); host.innerHTML = joinBlock(g);
-      bumpBasket();
-      toast({ icon: I.check, title: `${p.name} added`, sub: `${units(p, q)} at ${inr(priceNow(g))}. Check out to lock your place.`, href: '#/checkout', cta: 'Check out' });
-      $('[data-join]', host)?.focus();
-      return;
-    }
-    const lb = e.target.closest('[data-leave]');
-    if (lb) {
-      if (!confirm(`Leave the ${p.name.toLowerCase()} group? The amount blocked on your UPI is released.`)) return;
+    const jb = e.target.closest('[data-join]');
+    if (jb) { addToBasket(gid, jb); $('[data-join]', host)?.focus(); return; }
+    if (e.target.closest('[data-leave]')) {
+      // leaving is reversible, so it happens at once with an Undo, not behind a dialog
       leaveGroup(g);
-      host.innerHTML = joinBlock(g);
-      bind(gid);
+      refreshJoin(gid); bind(gid); updateBuybar(gid);
       $('[data-join]', host)?.focus();
     }
   });
 }
+function addToBasket(gid, from) {
+  const g = G(gid), p = PBY[g.pid];
+  const q = qtyDraft[gid] ?? inBasket(gid)?.q ?? 1, bk = inBasket(gid);
+  if (bk && bk.q === q) { openBasket(); return; }
+  const fromRect = from?.getBoundingClientRect(); // measure before the button is re-rendered
+  if (bk) bk.q = q; else S.basket.push({ gid, q });
+  delete qtyDraft[gid];
+  save(); refreshJoin(gid); updateBuybar(gid);
+  // the count changes when the photo lands, so cause and effect line up
+  flyToBasket(p, fromRect, () => { bindGlobal(); bumpBasket(); haptic(10); });
+  toast({ icon: I.check, title: `${p.name} added`, sub: `${units(p, q)} at ${inr(priceNow(g))}. Check out to lock your place.`, href: '#/checkout', action: 'Check out' });
+}
 function leaveGroup(g) {
   const p = PBY[g.pid], i = g.members.findIndex(m => m.me);
   if (i < 0) return;
-  const m = g.members[i];
+  const m = g.members[i], mine = g.events.filter(e => e.me);
+  const items = S.orders.flatMap(o => o.items).filter(it => it.gid === g.id && !it.left);
   g.members.splice(i, 1);
   g.events = g.events.filter(e => !e.me);
-  S.orders.forEach(o => o.items.forEach(it => { if (it.gid === g.id) it.left = true; }));
+  items.forEach(it => { it.left = true; });
   save();
-  toast({ icon: I.check, title: `You left ${p.name.toLowerCase()}`, sub: 'The UPI block is released within a few minutes.' });
+  toast({ icon: I.check, title: `You left ${p.name.toLowerCase()}`, sub: `${inr(items.reduce((a, it) => a + it.price * it.q, 0))} goes back to your UPI`, action: 'Undo', ms: 7000, onAction: () => {
+    if (g.status !== 'open' || g.members.some(x => x.me)) return;
+    g.members.splice(Math.min(i, g.members.length), 0, m);
+    g.events = [...g.events, ...mine].sort((a, b) => a.t - b.t);
+    items.forEach(it => { it.left = false; });
+    save(); refreshJoin(g.id); bind(g.id); updateBuybar(g.id);
+  } });
+}
+/* Phone buy bar: the Join button sits a screen and a half down on a phone, so a slim bar carries it
+   whenever the real one is out of view. */
+function updateBuybar(gid) {
+  const bb = $('[data-buybar]'); if (!bb || bb.dataset.g !== gid) return;
+  const g = G(gid), mine = myLine(g), bk = inBasket(gid);
+  bb.hidden = g.status !== 'open' || !!mine;
+  $('[data-buybar-act]', bb).innerHTML = bk ? `Check out${I.arrow}` : 'Join';
 }
 
 /* Start a group */
@@ -755,17 +798,21 @@ function viewCheckout() {
   form.addEventListener('change', e => {
     if (e.target.name === 'pay') { S.me.pay = e.target.value; save(); $('[data-f="upi"]').hidden = e.target.value !== 'vpa'; if (e.target.value === 'vpa') $('#upi').focus(); }
   });
-  form.addEventListener('input', e => { const f = e.target.closest('.field'); if (f) { f.classList.remove('invalid'); $('.err', f).textContent = ''; } });
+  form.addEventListener('input', e => { const f = e.target.closest('.field'); if (f) { f.classList.remove('invalid', 'valid'); $('.err', f).textContent = ''; } });
+  form.addEventListener('focusout', e => {
+    const f = e.target.closest('.field[data-f]'); if (!f || !e.target.value.trim()) return;
+    if (e.target.id === 'flat') e.target.value = fmtFlat(e.target.value);
+    const m = CHECKS[f.dataset.f](e.target.value);
+    f.classList.toggle('invalid', !!m); f.classList.toggle('valid', !m); $('.err', f).textContent = m;
+  });
   form.addEventListener('submit', e => {
     e.preventDefault();
-    const flat = $('#flat').value.trim().toUpperCase().replace(/\s+/g, '').replace(/^([A-F])(\d)/, '$1-$2');
+    const flat = fmtFlat($('#flat').value);
     const name = $('#name').value.trim();
     const payV = form.pay.value;
     const upi = $('#upi').value.trim();
     const errs = {};
-    if (!/^[A-F]-\d{3,4}$/.test(flat)) errs.flat = 'Use your tower (A to F) and flat number, like B-1204.';
-    if (name.length < 2) errs.name = 'Add the name the guard should call out.';
-    if (payV === 'vpa' && !/^[\w.\-]{2,}@[a-z]{2,}$/i.test(upi)) errs.upi = 'A UPI ID looks like name@bank.';
+    ['flat', 'name'].concat(payV === 'vpa' ? ['upi'] : []).forEach(k => { const m = CHECKS[k]({ flat, name, upi }[k]); if (m) errs[k] = m; });
     $$('.field[data-f]', form).forEach(f => { const k = f.dataset.f, m = errs[k] || ''; f.classList.toggle('invalid', !!m); $('.err', f).textContent = m; });
     const firstErr = Object.keys(errs)[0];
     if (firstErr) { $('#' + firstErr).focus(); return; }
@@ -775,6 +822,12 @@ function viewCheckout() {
     setTimeout(() => placeOrder(payV), 1400);
   });
 }
+const fmtFlat = v => v.trim().toUpperCase().replace(/\s+/g, '').replace(/^([A-F])(\d)/, '$1-$2');
+const CHECKS = {
+  flat: v => /^[A-F]-\d{3,4}$/.test(fmtFlat(v)) ? '' : 'Use your tower (A to F) and flat number, like B-1204.',
+  name: v => v.trim().length >= 2 ? '' : 'Add the name the guard should call out.',
+  upi: v => /^[\w.\-]{2,}@[a-z]{2,}$/i.test(v.trim()) ? '' : 'A UPI ID looks like name@bank.',
+};
 function placeOrder(payV) {
   const now = Date.now(), items = [];
   S.basket.forEach(b => {
@@ -792,6 +845,7 @@ function placeOrder(payV) {
   S.orders.unshift({ id, at: now, items, method: payV === 'vpa' ? S.me.upi : UPI.find(u => u.id === payV).name, flat: S.me.flat });
   S.basket = [];
   save(); bindGlobal();
+  haptic(15);
   go(`#/done/${id}`);
 }
 
@@ -840,7 +894,7 @@ function viewMine() {
       <div><span class="eyebrow">Flat ${esc(S.me.flat)}${S.me.name ? ' · ' + esc(S.me.name) : ''}</span><h1>Your group buys</h1></div>
       ${mine.length ? `<div class="stats"><div class="stat"><b>${mine.filter(g => g.status === 'open').length}</b><span>still open</span></div><div class="stat"><b data-back>${inr(Math.max(0, totalBack))}</b><span>back since you joined</span></div></div>` : ''}
     </div>
-    ${mine.length ? `<div class="mine-list">${mine.map(g => `<a class="mrow" href="#/g/${g.id}">${photo(PBY[g.pid], '120px')}<div style="display:contents" data-b="mine" data-g="${g.id}">${mineCells(g)}</div></a>`).join('')}</div>`
+    ${mine.length ? `<div class="mine-list">${mine.map(g => `<a class="mrow" href="#/g/${g.id}">${photo(PBY[g.pid], '120px').replace('<img ', `<img data-photo="${g.id}" `)}<div style="display:contents" data-b="mine" data-g="${g.id}">${mineCells(g)}</div></a>`).join('')}</div>`
       : `<div class="empty"><h3>You haven't joined a group yet</h3><p>Pick one your neighbours are already filling, or start your own.</p><a class="btn btn--primary" href="#/">See group buys${I.arrow}</a></div>`}
     ${S.orders.length ? `<section class="orders" aria-labelledby="ord-h"><h2 id="ord-h">Orders</h2>
       <table class="otable"><thead><tr><th scope="col">Order</th><th scope="col">Placed</th><th scope="col">Paid with</th><th scope="col">Blocked</th></tr></thead><tbody>
@@ -849,14 +903,59 @@ function viewMine() {
   </div></div>`;
 }
 
-/* ---------------- Basket drawer ---------------- */
+/* ---------------- Motion: springs and gestures ----------------
+   Springs take Apple's two designer parameters: damping ratio (1 = no overshoot) and response (seconds).
+   They always start from the value on screen and carry velocity, so any motion can be caught and reversed. */
+function spring({ from, to, velocity = 0, damping = 1, response = 0.35, rest = 0.5, onUpdate, onDone }) {
+  if (reduced) { onUpdate(to); onDone?.(); return { stop() {} }; }
+  const k = (2 * Math.PI / response) ** 2, c = 4 * Math.PI * damping / response;
+  let x = from, v = velocity, last = performance.now(), id = 0;
+  const step = now => {
+    const dt = Math.min(0.064, (now - last) / 1000), h = dt / 8; last = now;
+    for (let i = 0; i < 8; i++) { const a = -k * (x - to) - c * v; v += a * h; x += v * h; }
+    if (Math.abs(v) < rest * 4 && Math.abs(x - to) < rest) { onUpdate(to); onDone?.(); return; }
+    onUpdate(x); id = requestAnimationFrame(step);
+  };
+  id = requestAnimationFrame(step);
+  return { stop() { cancelAnimationFrame(id); } };
+}
+// where a flick would come to rest (Apple's projection, the same curve as scroll deceleration)
+const project = (v, d = 0.998) => (v / 1000) * d / (1 - d);
+// past an edge, follow less and less instead of stopping dead
+const rubberband = (over, dim, c = 0.55) => (over * dim * c) / (dim + c * Math.abs(over));
+function velocityOf(hist) {
+  const end = hist[hist.length - 1];
+  let i = hist.length - 1;
+  while (i > 0 && end.t - hist[i - 1].t < 100) i--;
+  const start = hist[i] === end ? hist[Math.max(0, i - 1)] : hist[i];
+  const dt = (end.t - start.t) / 1000;
+  return dt > 0 ? (end.p - start.p) / dt : 0;
+}
+const haptic = ms => { try { navigator.vibrate?.(ms); } catch {} };
+const isPhone = () => innerWidth <= 640;
+
+/* ---------------- Basket sheet ----------------
+   A bottom sheet on a phone (it rises from the Basket tab), a side panel on a wider screen (it comes from the
+   Basket button). Drag its top edge: it tracks 1:1, resists past open, and a flick projects to open or closed. */
 const drawer = $('[data-drawer]'), scrim = $('[data-scrim]');
+const sheet = { pos: 0, size: 1, anim: null, open: false };
 let lastFocus = null;
+function setSheet(p) {
+  sheet.pos = p;
+  drawer.style.transform = isPhone() ? `translate3d(0, ${p}px, 0)` : `translate3d(${p}px, 0, 0)`;
+  scrim.style.opacity = String(Math.max(0, Math.min(1, 1 - p / sheet.size)));
+}
+function moveSheet(to, { velocity = 0, damping = 1, response = 0.36, done } = {}) {
+  sheet.anim?.stop();
+  sheet.anim = spring({ from: sheet.pos, to, velocity, damping, response, onUpdate: setSheet, onDone: () => { sheet.anim = null; done?.(); } });
+}
+function hideSheet() { if (!sheet.open) { drawer.hidden = true; scrim.hidden = true; } }
 function drawBasket() {
   S.basket = S.basket.filter(b => G(b.gid) && G(b.gid).status !== 'closed');
   const lines = S.basket.map(b => ({ b, ...lineCalc(b) }));
   const total = lines.reduce((a, l) => a + l.amt, 0), mrp = lines.reduce((a, l) => a + l.mrp, 0);
-  drawer.innerHTML = `<div class="drawer__head"><h2 id="basket-h">Basket</h2><button class="icon-btn" type="button" data-close aria-label="Close basket">${I.close}</button></div>
+  drawer.innerHTML = `<div class="drawer__grab" aria-hidden="true"></div>
+    <div class="drawer__head"><h2 id="basket-h">Basket</h2><button class="icon-btn" type="button" data-close aria-label="Close basket">${I.close}</button></div>
     <div class="drawer__body">${lines.length ? lines.map(l => `<div class="line">${photo(l.p, '72px')}<div>
         <a class="line__name" href="${l.g.status === 'draft' ? '#/start/' + l.p.id : '#/g/' + l.g.id}" data-close>${esc(l.p.name)}</a>
         <div class="line__sub">${esc(l.p.pack)} · ${l.g.status === 'draft' ? 'you open this group' : `${count(l.g)} flats, ${left(l.g.closes - Date.now())}`}</div>
@@ -874,33 +973,79 @@ function drawBasket() {
     </div>` : ''}`;
 }
 function openBasket() {
-  lastFocus = document.activeElement;
+  if (!sheet.open) lastFocus = document.activeElement;
   drawBasket();
+  const wasHidden = drawer.hidden;
   drawer.hidden = false; scrim.hidden = false;
-  requestAnimationFrame(() => { drawer.classList.add('open'); scrim.classList.add('open'); $('[data-close]', drawer).focus(); });
+  sheet.size = (isPhone() ? drawer.offsetHeight : drawer.offsetWidth) || 1;
+  if (wasHidden) setSheet(sheet.size); // closed: start off-screen. Still closing: carry on from where it is now
+  sheet.open = true;
   document.body.style.overflow = 'hidden';
+  moveSheet(0, { response: 0.4 });
+  $('[data-close]', drawer).focus({ preventScroll: true });
 }
-function closeBasket(restore = true) {
-  if (drawer.hidden) return;
-  drawer.classList.remove('open'); scrim.classList.remove('open');
+function closeBasket(restore = true, velocity = 0) {
+  if (drawer.hidden || !sheet.open) return;
+  sheet.open = false;
   document.body.style.overflow = '';
-  setTimeout(() => { drawer.hidden = true; scrim.hidden = true; }, reduced ? 0 : 350);
-  if (restore) lastFocus?.focus?.();
+  moveSheet(sheet.size, { velocity, response: 0.32, done: hideSheet });
+  if (restore) lastFocus?.focus?.({ preventScroll: true });
 }
+let drag = null;
+drawer.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || !e.target.closest('.drawer__grab, .drawer__head')) return;
+  sheet.anim?.stop(); sheet.anim = null; // caught mid-flight: hold it where it is
+  const axis = isPhone() ? 'clientY' : 'clientX';
+  drag = { id: e.pointerId, axis, start: e[axis], from: sheet.pos, hist: [{ p: e[axis], t: e.timeStamp }], live: false };
+});
+addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const d = e[drag.axis] - drag.start;
+  if (!drag.live) {
+    if (Math.abs(d) < 6) return; // a little hysteresis so a tap on the close button stays a tap
+    drag.live = true; drawer.setPointerCapture(e.pointerId); drawer.classList.add('is-dragging');
+  }
+  drag.hist.push({ p: e[drag.axis], t: e.timeStamp }); if (drag.hist.length > 10) drag.hist.shift();
+  const p = drag.from + d;
+  setSheet(p < 0 ? rubberband(p, sheet.size) : p);
+});
+function endDrag(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const wasLive = drag.live, v = wasLive ? velocityOf(drag.hist) : 0;
+  drag = null; drawer.classList.remove('is-dragging');
+  if (!wasLive) { if (!sheet.anim) moveSheet(sheet.open ? 0 : sheet.size, { done: sheet.open ? undefined : hideSheet }); return; }
+  // decide by where the flick is going, not where the finger let go
+  if (sheet.pos + project(v) > sheet.size * 0.5) closeBasket(true, v);
+  else moveSheet(0, { velocity: v, damping: 0.8, response: 0.3 });
+}
+addEventListener('pointerup', endDrag);
+addEventListener('pointercancel', endDrag);
+addEventListener('resize', () => { if (drawer.hidden) return; sheet.size = (isPhone() ? drawer.offsetHeight : drawer.offsetWidth) || 1; drawer.style.transform = ''; setSheet(sheet.open ? 0 : sheet.size); });
+
 drawer.addEventListener('click', e => {
   const q = e.target.closest('[data-bq]');
   if (q) { const b = inBasket(q.dataset.gid); b.q = Math.max(1, Math.min(6, b.q + +q.dataset.bq)); save(); drawBasket(); $(`[data-bq="${q.dataset.bq}"][data-gid="${q.dataset.gid}"]`, drawer)?.focus(); refreshJoin(q.dataset.gid); return; }
   const rm = e.target.closest('[data-rm]');
-  if (rm) {
-    const g = G(rm.dataset.rm);
-    S.basket = S.basket.filter(b => b.gid !== rm.dataset.rm);
-    if (g?.status === 'draft') S.groups = S.groups.filter(x => x !== g);
-    save(); drawBasket(); bindGlobal(); refreshJoin(rm.dataset.rm); $('[data-close]', drawer).focus();
-    if (route().name === 'checkout') render();
-    return;
-  }
+  if (rm) { removeFromBasket(rm.dataset.rm); $('[data-close]', drawer).focus(); return; }
   if (e.target.closest('[data-close]')) closeBasket(!e.target.closest('a'));
 });
+function removeFromBasket(gid) {
+  const i = S.basket.findIndex(b => b.gid === gid); if (i < 0) return;
+  const line = S.basket[i], g = G(gid), draft = g?.status === 'draft' ? g : null, p = PBY[g.pid];
+  S.basket.splice(i, 1);
+  if (draft) S.groups = S.groups.filter(x => x !== draft);
+  save(); afterBasketChange(gid);
+  toast({ icon: I.minus, title: `${p.name} removed`, sub: 'Taken out of your basket', action: 'Undo', onAction: () => {
+    if (draft && !S.groups.includes(draft)) S.groups.push(draft);
+    if (!inBasket(gid)) S.basket.splice(Math.min(i, S.basket.length), 0, line);
+    save(); afterBasketChange(gid);
+  } });
+}
+function afterBasketChange(gid) {
+  bindGlobal(); refreshJoin(gid); updateBuybar(gid);
+  if (!drawer.hidden && sheet.open) drawBasket();
+  if (route().name === 'checkout') render();
+}
 drawer.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeBasket();
   if (e.key === 'Tab') {
@@ -911,19 +1056,79 @@ drawer.addEventListener('keydown', e => {
 });
 scrim.addEventListener('click', () => closeBasket());
 $$('[data-open-basket]').forEach(b => b.addEventListener('click', openBasket));
-function refreshJoin(gid) { const host = $(`[data-b="join"][data-g="${gid}"]`); if (host) { delete qtyDraft[gid]; host.innerHTML = joinBlock(G(gid)); } }
-function bumpBasket() { const b = $('.basket-btn'); b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+function refreshJoin(gid) { const host = $(`[data-b="join"][data-g="${gid}"]`); if (host) { delete qtyDraft[gid]; host.innerHTML = joinBlock(G(gid)); host.dataset.sig = joinSig(G(gid)); } }
+function bumpBasket() { $$('.basket-btn, .tabs [data-nav="checkout"]').forEach(b => { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }); }
 
-/* ---------------- Toasts ---------------- */
-function toast({ icon, title, sub, href, cta }) {
+/* The product photo travels from the Join button into the basket, so you see where it went.
+   X and Y are separate springs, Y a little quicker, which bends the path into an arc. */
+function flyToBasket(p, from, done) {
+  const target = $$('.basket-btn, .tabs [data-nav="checkout"]').find(el => el.getClientRects().length && getComputedStyle(el).display !== 'none' && el.closest('.tabs, .bar') && getComputedStyle(el.closest('.tabs, .bar')).display !== 'none');
+  if (reduced || !from?.width || !target) { done(); return; }
+  const a = from, b = target.getBoundingClientRect();
+  const sx = a.left + a.width / 2 - 26, sy = a.top + a.height / 2 - 26, tx = b.left + b.width / 2 - 26, ty = b.top + b.height / 2 - 26;
+  const dot = document.createElement('div');
+  dot.className = 'fly'; dot.innerHTML = `<img src="assets/img/photo-${p.img}-500.jpg" alt="">`;
+  document.body.appendChild(dot);
+  let x = sx, y = sy, landed = 0;
+  const put = () => { const k = Math.min(1, Math.hypot(x - tx, y - ty) / (Math.hypot(sx - tx, sy - ty) || 1)); dot.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${0.45 + 0.55 * k})`; };
+  let finished = false;
+  const finish = () => { if (finished) return; finished = true; dot.remove(); done(); };
+  const fin = () => { if (++landed === 2) finish(); };
+  setTimeout(finish, 1400); // frames can pause in a background tab; the basket still has to update
+  put();
+  spring({ from: sx, to: tx, response: 0.55, rest: 2, onUpdate: v => { x = v; put(); }, onDone: fin });
+  spring({ from: sy, to: ty, response: 0.38, rest: 2, onUpdate: v => { y = v; put(); }, onDone: fin });
+}
+
+/* ---------------- Toasts ----------------
+   Status, completion and undo. Hover or focus holds them; swipe one sideways to send it away. */
+function toast({ icon, title, sub, href, action, onAction, ms = 5200 }) {
   const box = $('[data-toasts]');
-  const el = document.createElement(href ? 'a' : 'div');
+  const el = document.createElement('div');
   el.className = 'toast';
-  if (href) el.href = href;
-  el.innerHTML = `<span class="av" aria-hidden="true">${icon || I.check}</span><span><b>${esc(title)}</b><small>${esc(sub || '')}${cta ? ` · ${esc(cta)}` : ''}</small></span>`;
+  const act = action ? (href ? `<a class="toast__act" href="${esc(href)}">${esc(action)}</a>` : `<button class="toast__act" type="button">${esc(action)}</button>`) : '';
+  el.innerHTML = `<span class="av" aria-hidden="true">${icon || I.check}</span><span class="toast__text"><b>${esc(title)}</b><small>${esc(sub || '')}</small></span>${act}${href && !action ? `<a class="toast__cover" href="${esc(href)}" aria-label="${esc(title)}"></a>` : ''}`;
   box.appendChild(el);
   while (box.children.length > 3) box.firstElementChild.remove();
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, 5200);
+  let timer = 0, gone = false, x = 0, anim = null;
+  const dismiss = (velocity = 0, dir = -1) => {
+    if (gone) return; gone = true; clearTimeout(timer);
+    if (reduced || !velocity) { el.classList.add('out'); setTimeout(() => el.remove(), 300); return; }
+    anim?.stop(); anim = spring({ from: x, to: dir * (el.offsetWidth + 40), velocity, response: 0.3, onUpdate: v => { x = v; el.style.transform = `translateX(${v}px)`; el.style.opacity = String(1 - Math.min(1, Math.abs(v) / el.offsetWidth)); }, onDone: () => el.remove() });
+  };
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => dismiss(), ms); };
+  arm();
+  el.addEventListener('pointerenter', () => clearTimeout(timer));
+  el.addEventListener('pointerleave', () => { if (!gone && !d) arm(); });
+  el.addEventListener('focusin', () => clearTimeout(timer));
+  el.addEventListener('focusout', arm);
+  $('.toast__act', el)?.addEventListener('click', () => { onAction?.(); dismiss(); });
+  let d = null;
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('.toast__act')) return;
+    anim?.stop(); clearTimeout(timer);
+    d = { id: e.pointerId, start: e.clientX, from: x, hist: [{ p: e.clientX, t: e.timeStamp }], live: false };
+    // track on the window, so a fast swipe that leaves the toast is still followed
+    addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up);
+  });
+  const move = e => {
+    if (!d || e.pointerId !== d.id) return;
+    const dx = e.clientX - d.start;
+    if (!d.live) { if (Math.abs(dx) < 6) return; d.live = true; el.setPointerCapture(e.pointerId); }
+    d.hist.push({ p: e.clientX, t: e.timeStamp }); if (d.hist.length > 10) d.hist.shift();
+    x = d.from + dx; el.style.transform = `translateX(${x}px)`; el.style.opacity = String(1 - Math.min(0.6, Math.abs(x) / el.offsetWidth));
+  };
+  const up = e => {
+    if (!d || e.pointerId !== d.id) return;
+    removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+    const live = d.live, v = live ? velocityOf(d.hist) : 0; d = null;
+    if (!live) { arm(); return; }
+    el.dataset.dragged = '1'; setTimeout(() => { delete el.dataset.dragged; }, 50);
+    const land = x + project(v);
+    if (Math.abs(land) > el.offsetWidth * 0.4) dismiss(v || Math.sign(x) * 400, Math.sign(land));
+    else { anim = spring({ from: x, to: 0, velocity: v, damping: 0.8, response: 0.3, onUpdate: n => { x = n; el.style.transform = `translateX(${n}px)`; el.style.opacity = String(1 - Math.min(0.6, Math.abs(n) / el.offsetWidth)); } }); arm(); }
+  };
+  el.addEventListener('click', e => { if (el.dataset.dragged) e.preventDefault(); }, true);
 }
 
 /* ---------------- Live simulation ---------------- */
@@ -986,25 +1191,55 @@ function route() {
 }
 function go(h) { if (location.hash === h) render(); else location.hash = h; }
 let prevRoute = '';
+const scrollMemo = {};
+let buyIO = null;
 function render() {
   const r = route();
   closeBasket(false);
   fresh = null;
+  buyIO?.disconnect(); buyIO = null;
   ({ discover: viewDiscover, group: () => viewGroup(r.arg), start: () => viewStart(r.arg), checkout: viewCheckout, mine: viewMine, done: () => viewDone(r.arg) })[r.name]();
   $$('[data-nav]').forEach(a => a.toggleAttribute('aria-current', false));
   $$(`[data-nav="${r.name}"]`).forEach(a => a.setAttribute('aria-current', 'page'));
   const titles = { discover: 'Group buys in your society', group: PBY[G(r.arg)?.pid]?.name || 'Group buy', start: 'Start a group buy', checkout: 'Check out', mine: 'Your group buys', done: 'Order placed' };
   document.title = `${titles[r.name]} · GroupBuy`;
-  const key = location.hash;
-  if (key !== prevRoute) { window.scrollTo(0, 0); if (prevRoute) VIEW.focus({ preventScroll: true }); }
+  const key = location.hash || '#/';
+  if (key !== prevRoute) {
+    // coming back from a group: return to the spot in the list you left, so the photo lands where you tapped it
+    const back = prevRoute.startsWith('#/g/') && scrollMemo[key] != null;
+    window.scrollTo(0, back ? scrollMemo[key] : 0);
+    if (prevRoute) VIEW.focus({ preventScroll: true });
+  }
   prevRoute = key;
+  edge();
 }
+// The tapped photo grows into the group page, and shrinks back into its card on the way out.
+function tagShared(gid) {
+  $$('.vt-shared').forEach(el => { el.style.viewTransitionName = ''; el.classList.remove('vt-shared'); });
+  if (!gid) return;
+  const el = $$(`[data-photo="${gid}"]`).find(n => { const b = n.getBoundingClientRect(); return b.width && b.bottom > 0 && b.top < innerHeight; });
+  if (el) { el.style.viewTransitionName = 'gb-photo'; el.classList.add('vt-shared'); }
+}
+function navigate() {
+  scrollMemo[prevRoute] = scrollY;
+  const r = route();
+  const gid = r.name === 'group' ? r.arg : prevRoute.startsWith('#/g/') ? prevRoute.slice(4) : null;
+  if (!document.startViewTransition || reduced || !gid) { render(); return; }
+  tagShared(gid);
+  document.documentElement.classList.add('vt-nav');
+  const vt = document.startViewTransition(() => { render(); tagShared(gid); });
+  vt.finished.finally(() => { document.documentElement.classList.remove('vt-nav'); tagShared(null); });
+}
+// a soft fade under the top bar only once content scrolls beneath it, instead of a hard rule
+const bar = $('.bar');
+function edge() { bar.classList.toggle('edge', scrollY > 4); }
+addEventListener('scroll', () => requestAnimationFrame(edge), { passive: true });
 
 $('[data-reset]').addEventListener('click', () => {
   if (!confirm('Reset GroupBuy to its starting data? Your orders and groups here are cleared.')) return;
   localStorage.removeItem(STORE); load(); prevRoute = ''; go('#/');
 });
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', navigate);
 // another tab changed the state: adopt it and refresh the live numbers in place (only the visible tab simulates)
 window.addEventListener('storage', e => {
   if (e.key !== STORE || !e.newValue) return;

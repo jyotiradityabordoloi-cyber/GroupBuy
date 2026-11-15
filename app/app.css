@@ -34,11 +34,12 @@
 @media (max-width: 640px) { :root { --edge: 16px; --bar-h: 60px; } }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--bar-h) + 16px); }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--bar-h) + 16px); scrollbar-gutter: stable; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 400 16px/1.5 var(--font-text);
   -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
 }
 img { display: block; max-width: 100%; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -66,9 +67,14 @@ p { margin: 0; }
 /* ---------- Top bar ---------- */
 .bar {
   position: sticky; top: 0; z-index: 40; height: var(--bar-h);
-  background: rgb(255 255 255 / .92); backdrop-filter: saturate(1.4) blur(12px);
-  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / .78); backdrop-filter: saturate(1.8) blur(20px); -webkit-backdrop-filter: saturate(1.8) blur(20px);
 }
+/* scroll edge: a soft fade only once content passes underneath, instead of a permanent hard rule */
+.bar::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 14px; pointer-events: none;
+  background: linear-gradient(rgb(17 17 17 / .07), rgb(17 17 17 / 0)); opacity: 0; transition: opacity .25s;
+}
+.bar.edge::after { opacity: 1; }
 .bar .wrap { height: 100%; display: flex; align-items: center; gap: 24px; }
 .logo { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font: 600 21px/1 var(--font-display); letter-spacing: -0.03em; }
 .logo__mark { width: 26px; height: 26px; flex: none; }
@@ -486,15 +492,28 @@ main { min-height: calc(100vh - var(--bar-h)); }
 .preview .btn { margin-top: 20px; }
 
 /* ---------- Basket drawer ---------- */
-.scrim { position: fixed; inset: 0; z-index: 60; background: rgb(17 17 17 / .38); opacity: 0; transition: opacity .25s var(--ease); }
-.scrim.open { opacity: 1; }
+/* position is driven by a spring in app.js (interruptible, follows the finger), so no CSS transition here */
+.scrim { position: fixed; inset: 0; z-index: 60; background: rgb(17 17 17 / .38); opacity: 0; }
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 61; width: min(460px, 100%); background: var(--bg);
-  display: flex; flex-direction: column; transform: translateX(100%); transition: transform .35s var(--ease);
+  display: flex; flex-direction: column; transform: translateX(110%); will-change: transform;
   box-shadow: -20px 0 60px -30px rgb(0 0 0 / .4);
 }
-.drawer.open { transform: none; }
-.drawer__head { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+.drawer.is-dragging { user-select: none; cursor: grabbing; }
+.drawer__grab { display: none; }
+.drawer__head { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--line); touch-action: none; }
+@media (max-width: 640px) {
+  /* a bottom sheet that rises from the Basket tab */
+  .drawer {
+    top: auto; left: 0; width: 100%; max-height: 88vh; max-height: 88dvh; border-radius: 22px 22px 0 0;
+    transform: translateY(110%); box-shadow: 0 -20px 60px -30px rgb(0 0 0 / .45);
+  }
+  .drawer__grab { display: block; height: 22px; flex: none; touch-action: none; cursor: grab; position: relative; }
+  .drawer__grab::before { content: ""; position: absolute; left: 50%; top: 9px; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: #d2d2ce; }
+  .drawer__head { padding: 2px 20px 14px; }
+  .drawer__body { padding: 0 20px; }
+  .drawer__foot { padding: 16px 20px calc(16px + env(safe-area-inset-bottom)); }
+}
 .drawer__head h2 { font-size: 24px; }
 .drawer__body { flex: 1; overflow: auto; padding: 8px 24px; }
 .drawer__foot { padding: 20px 24px calc(20px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); display: grid; gap: 14px; }
@@ -600,10 +619,43 @@ main { min-height: calc(100vh - var(--bar-h)); }
 .toasts { position: fixed; left: 24px; bottom: 24px; z-index: 80; display: grid; gap: 10px; width: min(380px, calc(100vw - 32px)); pointer-events: none; }
 @media (max-width: 860px) { .toasts { left: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); } }
 .toast {
-  pointer-events: auto; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: center; padding: 12px 16px 12px 12px;
+  position: relative; pointer-events: auto; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 12px 12px 12px;
   border-radius: var(--r-md); background: var(--ink); color: #fff; box-shadow: var(--shadow-pop); font-size: 15px; text-decoration: none;
-  animation: toastIn .4s var(--ease);
+  animation: toastIn .4s var(--ease); touch-action: pan-y; user-select: none;
 }
+.toast__text { min-width: 0; padding-right: 4px; }
+.toast__act {
+  position: relative; z-index: 1; display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: var(--r-pill);
+  border: 0; background: rgb(255 255 255 / .14); color: #fff; font-weight: 500; font-size: 14px; text-decoration: none; white-space: nowrap;
+  transition: background .2s, transform .1s;
+}
+.toast__act:hover { background: rgb(255 255 255 / .24); }
+.toast__act:active { transform: scale(.95); }
+.toast__cover { position: absolute; inset: 0; border-radius: inherit; }
+.toast__cover:focus-visible { outline-offset: 2px; }
+
+/* the product photo that travels into the basket */
+.fly {
+  position: fixed; left: 0; top: 0; z-index: 90; width: 52px; height: 52px; border-radius: 50%; overflow: hidden; pointer-events: none;
+  box-shadow: 0 0 0 3px #fff, 0 10px 24px -8px rgb(0 0 0 / .45); will-change: transform;
+}
+.fly img { width: 100%; height: 100%; object-fit: cover; }
+
+/* phone buy bar: carries Join while the real button is off screen */
+.buybar {
+  position: fixed; left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 44;
+  display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 18px;
+  border-radius: var(--r-pill); background: rgb(255 255 255 / .82); backdrop-filter: saturate(1.6) blur(20px); -webkit-backdrop-filter: saturate(1.6) blur(20px);
+  border: 1px solid rgb(255 255 255 / .6); box-shadow: 0 1px 0 rgb(255 255 255 / .8) inset, 0 12px 32px -14px rgb(0 0 0 / .35);
+  transform: translateY(calc(100% + 100px)); transition: transform .38s cubic-bezier(.2, .9, .25, 1);
+}
+.buybar.show { transform: none; }
+.buybar__info { display: grid; line-height: 1.2; }
+.buybar__info b { font: 500 20px/1.1 var(--font-mono); letter-spacing: -0.03em; }
+.buybar__info span { font-size: 13px; color: var(--ink-2); }
+.buybar .btn { min-height: 48px; padding: 0 26px; }
+@media (max-width: 1000px) { .buybar { display: flex; } }
+@media (min-width: 861px) and (max-width: 1000px) { .buybar { bottom: 16px; left: auto; width: 420px; right: var(--edge); } }
 .toast small { display: block; color: #b5b5b5; font-size: 13px; }
 .toast .av { background: #2a2a2a; border-color: #2a2a2a; color: #fff; }
 .toast .av svg { width: 20px; height: 20px; }
@@ -654,6 +706,40 @@ main { min-height: calc(100vh - var(--bar-h)); }
   .summary { padding: 20px; }
 }
 
+/* ---------- Response: feedback lands on press, not on release ---------- */
+.card:active .card__photo { transform: scale(.985); transition-duration: .1s; }
+.feature:active { transform: scale(.995); transition-duration: .1s; }
+.srow:active img, .line img:active { transform: scale(.96); }
+.mrow:active { transform: scale(.99); transition-duration: .1s; }
+.pick label:active { transform: scale(.98); transition-duration: .1s; }
+.tabs a:active svg { transform: scale(.88); }
+.tabs a svg { transition: transform .15s var(--ease); }
+.tabs a.bump svg { animation: bump .45s var(--ease); }
+.field.valid input { border-color: #9fb6f5; }
+
+/* ---------- Material: chrome is a translucent layer, content passes beneath ---------- */
+@media (max-width: 860px) {
+  .tabs { background: rgb(255 255 255 / .78); backdrop-filter: saturate(1.8) blur(20px); -webkit-backdrop-filter: saturate(1.8) blur(20px); }
+}
+
+/* ---------- The tapped photo grows into the group page and back ---------- */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .24s; }
+::view-transition-group(gb-photo) { animation-duration: .5s; animation-timing-function: cubic-bezier(.2, .9, .25, 1); z-index: 50; }
+::view-transition-old(gb-photo), ::view-transition-new(gb-photo) { height: 100%; object-fit: cover; overflow: clip; }
+.vt-nav .view { animation: none; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .buybar { transform: none; opacity: 0; transition: opacity .2s !important; }
+  .buybar.show { opacity: 1; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .bar, .tabs, .buybar { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .tag { background: #fff; }
+}
+@media (prefers-contrast: more) {
+  :root { --muted: #474747; --line: #8f8f8a; }
+  .bar, .tabs, .buybar { background: #fff; backdrop-filter: none; }
+  .bar { border-bottom: 1px solid #111; }
+  .buybar { border-color: #111; }
 }
